@@ -2,6 +2,8 @@ import PDFDocument from 'pdfkit';
 import { Writable } from 'stream';
 import { COMPANY_INFO, InvoiceStatus } from '../constants/invoice.constant';
 import { formatCurrencyVND } from '../utils/calculation.util';
+import { numberToWordsVN } from '../utils/numberToWordsVN.util';
+import { generateQrCodeBuffer, buildInvoiceQrPayload } from '../utils/qrCode.util';
 
 export interface InvoicePdfData {
   id: string;
@@ -38,7 +40,7 @@ export class PdfService {
   /**
    * Generates a PDF invoice and pipes it into a writable stream (e.g. Express Response)
    */
-  generateInvoicePdfStream(invoice: InvoicePdfData, outputStream: Writable): void {
+  async generateInvoicePdfStream(invoice: InvoicePdfData, outputStream: Writable): Promise<void> {
     const doc = new PDFDocument({
       size: 'A4',
       margin: 40,
@@ -51,11 +53,19 @@ export class PdfService {
 
     doc.pipe(outputStream);
 
+    const qrPayload = buildInvoiceQrPayload(
+      invoice.id,
+      invoice.invoiceNumber,
+      invoice.totalAmount,
+      invoice.customerName
+    );
+    const qrBuffer = await generateQrCodeBuffer(qrPayload, { width: 70, margin: 1 });
+
     this.renderHeader(doc, invoice);
     this.renderCustomerAndInvoiceInfo(doc, invoice);
     this.renderItemsTable(doc, invoice);
     this.renderTotals(doc, invoice);
-    this.renderFooterAndNotes(doc, invoice);
+    this.renderFooterAndNotes(doc, invoice, qrBuffer);
 
     if (invoice.status === InvoiceStatus.CANCELED || invoice.status === InvoiceStatus.DRAFT) {
       this.renderWatermark(doc, invoice.status);
@@ -68,6 +78,14 @@ export class PdfService {
    * Generates a PDF invoice and returns it as a Buffer (useful for testing and email attachments)
    */
   async generateInvoicePdfBuffer(invoice: InvoicePdfData): Promise<Buffer> {
+    const qrPayload = buildInvoiceQrPayload(
+      invoice.id,
+      invoice.invoiceNumber,
+      invoice.totalAmount,
+      invoice.customerName
+    );
+    const qrBuffer = await generateQrCodeBuffer(qrPayload, { width: 70, margin: 1 });
+
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({ size: 'A4', margin: 40 });
       const buffers: Buffer[] = [];
@@ -80,7 +98,7 @@ export class PdfService {
       this.renderCustomerAndInvoiceInfo(doc, invoice);
       this.renderItemsTable(doc, invoice);
       this.renderTotals(doc, invoice);
-      this.renderFooterAndNotes(doc, invoice);
+      this.renderFooterAndNotes(doc, invoice, qrBuffer);
 
       if (invoice.status === InvoiceStatus.CANCELED || invoice.status === InvoiceStatus.DRAFT) {
         this.renderWatermark(doc, invoice.status);
@@ -215,10 +233,21 @@ export class PdfService {
       align: 'right',
       width: boxWidth - 20,
     });
+
+    // In Words Section (Vietnamese Standard)
+    const wordsY = startY + 88;
+    const words = numberToWordsVN(invoice.totalAmount);
+    doc.rect(40, wordsY, 515, 24).fillAndStroke('#F8FAFC', '#E2E8F0');
+    doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#1E293B').text('Bang chu (In words):', 50, wordsY + 7);
+    doc.font('Helvetica-Oblique').fillColor('#1E40AF').text(words, 150, wordsY + 7, { width: 395 });
   }
 
-  private renderFooterAndNotes(doc: PDFKit.PDFDocument, invoice: InvoicePdfData): void {
-    const footerY = 480;
+  private renderFooterAndNotes(
+    doc: PDFKit.PDFDocument,
+    invoice: InvoicePdfData,
+    qrBuffer: Buffer
+  ): void {
+    const footerY = 510;
 
     // Replacement or notes alert
     if (invoice.replacedInvoice) {
@@ -235,15 +264,22 @@ export class PdfService {
       doc.font('Helvetica').fillColor('#64748B').text(invoice.notes, 110, footerY - 15, { width: 440 });
     }
 
-    // Signatures
-    const sigY = footerY + 25;
-    doc.fontSize(9).font('Helvetica-Bold').fillColor('#1E293B');
-    doc.text('NGUOI MUA HANG (Buyer)', 70, sigY, { align: 'center', width: 160 });
-    doc.fontSize(7.5).font('Helvetica').fillColor('#94A3B8').text('(Ky, ghi ro ho ten)', 70, sigY + 12, { align: 'center', width: 160 });
+    // Signatures and QR Code
+    const sigY = footerY + 20;
 
+    // QR Code for verification & payment (Center-Left)
+    doc.image(qrBuffer, 45, sigY, { width: 65, height: 65 });
+    doc.fontSize(7.5).font('Helvetica').fillColor('#64748B').text('Scan to Verify / Pay', 40, sigY + 68, { align: 'center', width: 75 });
+
+    // Buyer Signature
     doc.fontSize(9).font('Helvetica-Bold').fillColor('#1E293B');
-    doc.text('NGUOI BAN HANG (Seller)', 360, sigY, { align: 'center', width: 160 });
-    doc.fontSize(7.5).font('Helvetica').fillColor('#94A3B8').text('(Ky dien tu, dong dau)', 360, sigY + 12, { align: 'center', width: 160 });
+    doc.text('NGUOI MUA HANG (Buyer)', 150, sigY + 5, { align: 'center', width: 160 });
+    doc.fontSize(7.5).font('Helvetica').fillColor('#94A3B8').text('(Ky, ghi ro ho ten)', 150, sigY + 18, { align: 'center', width: 160 });
+
+    // Seller Signature
+    doc.fontSize(9).font('Helvetica-Bold').fillColor('#1E293B');
+    doc.text('NGUOI BAN HANG (Seller)', 360, sigY + 5, { align: 'center', width: 160 });
+    doc.fontSize(7.5).font('Helvetica').fillColor('#94A3B8').text('(Ky dien tu, dong dau)', 360, sigY + 18, { align: 'center', width: 160 });
 
     // Payment info at bottom
     doc.rect(40, 750, 515, 30).fill('#F1F5F9');
