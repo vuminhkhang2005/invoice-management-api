@@ -42,12 +42,64 @@ export class InvoiceController {
   };
 
   /**
+   * GET /api/invoices/analytics/summary - Get financial summary and statistics
+   */
+  getAnalyticsSummary = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const analytics = await this.invoiceService.getAnalyticsSummary();
+      sendSuccess(res, analytics, 'Analytics summary retrieved successfully');
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * GET /api/invoices/export/csv - Export invoices as CSV
+   */
+  exportCsv = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const csvData = await this.invoiceService.exportInvoicesCsv(req.query as any);
+      const filename = `invoices_export_${new Date().toISOString().slice(0, 10)}.csv`;
+
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.status(200).send(csvData);
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
    * GET /api/invoices/:id - Get invoice by ID
    */
   getInvoiceById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const invoice = await this.invoiceService.getInvoiceById(req.params.id);
       sendSuccess(res, invoice, 'Invoice details retrieved successfully');
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * GET /api/invoices/:id/history - Get audit history / activity logs
+   */
+  getInvoiceHistory = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const history = await this.invoiceService.getInvoiceHistory(req.params.id);
+      sendSuccess(res, history, 'Invoice history retrieved successfully');
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * GET /api/invoices/:id/verify - Verify invoice authenticity
+   */
+  verifyInvoice = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const verification = await this.invoiceService.verifyInvoice(req.params.id);
+      sendSuccess(res, verification, 'Invoice verification completed');
     } catch (error) {
       next(error);
     }
@@ -124,7 +176,7 @@ export class InvoiceController {
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
 
-      this.pdfService.generateInvoicePdfStream(invoice, res);
+      await this.pdfService.generateInvoicePdfStream(invoice, res);
     } catch (error) {
       next(error);
     }

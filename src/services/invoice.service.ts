@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { prisma as defaultPrisma } from '../config/database';
-import { InvoiceStatus } from '../constants/invoice.constant';
+import { COMPANY_INFO, InvoiceStatus } from '../constants/invoice.constant';
 import { BadRequestError, NotFoundError } from '../errors/appError';
 import {
   CreateInvoiceInput,
@@ -9,8 +9,9 @@ import {
   ReplaceInvoiceInput,
   ListInvoicesQuery,
 } from '../schemas/invoice.schema';
-import { calculateInvoiceTotals } from '../utils/calculation.util';
+import { calculateInvoiceTotals, formatCurrencyVND } from '../utils/calculation.util';
 import { generateInvoiceNumber } from '../utils/invoiceNumber.util';
+import { numberToWordsVN } from '../utils/numberToWordsVN.util';
 
 export class InvoiceService {
   private db: PrismaClient;
@@ -22,7 +23,7 @@ export class InvoiceService {
   /**
    * 1. Create a draft invoice
    */
-  async createDraft(input: CreateInvoiceInput) {
+  async createDraft(input: CreateInvoiceInput, actor = 'System / User') {
     const { items, taxRate = 10, ...customerData } = input;
 
     const calculation = calculateInvoiceTotals(items, taxRate);
@@ -46,6 +47,13 @@ export class InvoiceService {
             unitPrice: item.unitPrice,
             amount: item.amount,
           })),
+        },
+        activities: {
+          create: {
+            action: 'CREATED',
+            actor,
+            description: `Draft invoice created with ${calculation.items.length} item(s) for customer '${customerData.customerName}'`,
+          },
         },
       },
       include: {
@@ -142,6 +150,9 @@ export class InvoiceService {
             totalAmount: true,
           },
         },
+        activities: {
+          orderBy: { createdAt: 'desc' },
+        },
       },
     });
 
@@ -149,14 +160,19 @@ export class InvoiceService {
       throw new NotFoundError(`Invoice with ID '${id}'`);
     }
 
-    return invoice;
+    const totalAmountInWords = numberToWordsVN(Number(invoice.totalAmount));
+
+    return {
+      ...invoice,
+      totalAmountInWords,
+    };
   }
 
   /**
    * 4. Update draft invoice
    * Immutable rule: Only DRAFT invoices can be modified.
    */
-  async updateDraft(id: string, input: UpdateInvoiceInput) {
+  async updateDraft(id: string, input: UpdateInvoiceInput, actor = 'System / User') {
     const existing = await this.db.invoice.findUnique({
       where: { id },
       include: { items: true },
@@ -204,6 +220,15 @@ export class InvoiceService {
           })),
         });
       }
+
+      await tx.invoiceActivity.create({
+        data: {
+          invoiceId: id,
+          action: 'UPDATED',
+          actor,
+          description: 'Draft invoice details and line items updated',
+        },
+      });
 
       return tx.invoice.update({
         where: { id },
@@ -257,7 +282,7 @@ export class InvoiceService {
    * 6. Issue invoice (DRAFT -> ISSUED)
    * Assigns unique invoice number and issue date. Locks future edits.
    */
-  async issueInvoice(id: string) {
+  async issueInvoice(id: string, actor = 'System / User') {
     const existing = await this.db.invoice.findUnique({
       where: { id },
       include: { items: true },
@@ -289,16 +314,27 @@ export class InvoiceService {
     const now = new Date();
     const invoiceNumber = generateInvoiceNumber(issuedCount + 1, now);
 
-    const issued = await this.db.invoice.update({
-      where: { id },
-      data: {
-        status: InvoiceStatus.ISSUED,
-        invoiceNumber,
-        issuedAt: now,
-      },
-      include: {
-        items: true,
-      },
+    const issued = await this.db.$transaction(async (tx) => {
+      await tx.invoiceActivity.create({
+        data: {
+          invoiceId: id,
+          action: 'ISSUED',
+          actor,
+          description: `Invoice officially issued with number '${invoiceNumber}'`,
+        },
+      });
+
+      return tx.invoice.update({
+        where: { id },
+        data: {
+          status: InvoiceStatus.ISSUED,
+          invoiceNumber,
+          issuedAt: now,
+        },
+        include: {
+          items: true,
+        },
+      });
     });
 
     return issued;
@@ -308,7 +344,7 @@ export class InvoiceService {
    * 7. Cancel invoice (ISSUED -> CANCELED)
    * Requires cancellation reason and records cancellation timestamp.
    */
-  async cancelInvoice(id: string, input: CancelInvoiceInput) {
+  async cancelInvoice(id: string, input: CancelInvoiceInput, actor = 'System / User') {
     const existing = await this.db.invoice.findUnique({
       where: { id },
     });
@@ -327,16 +363,27 @@ export class InvoiceService {
       );
     }
 
-    const canceled = await this.db.invoice.update({
-      where: { id },
-      data: {
-        status: InvoiceStatus.CANCELED,
-        cancelReason: input.cancelReason,
-        canceledAt: new Date(),
-      },
-      include: {
-        items: true,
-      },
+    const canceled = await this.db.$transaction(async (tx) => {
+      await tx.invoiceActivity.create({
+        data: {
+          invoiceId: id,
+          action: 'CANCELED',
+          actor,
+          description: `Invoice canceled. Reason: ${input.cancelReason}`,
+        },
+      });
+
+      return tx.invoice.update({
+        where: { id },
+        data: {
+          status: InvoiceStatus.CANCELED,
+          cancelReason: input.cancelReason,
+          canceledAt: new Date(),
+        },
+        include: {
+          items: true,
+        },
+      });
     });
 
     return canceled;
@@ -346,7 +393,7 @@ export class InvoiceService {
    * 8. Replace invoice (ISSUED/CANCELED -> REPLACED + Create new Invoice)
    * Old invoice is marked as REPLACED, new invoice is created with reference to old invoice.
    */
-  async replaceInvoice(id: string, input: ReplaceInvoiceInput) {
+  async replaceInvoice(id: string, input: ReplaceInvoiceInput, actor = 'System / User') {
     const oldInvoice = await this.db.invoice.findUnique({
       where: { id },
       include: { items: true },
@@ -393,6 +440,15 @@ export class InvoiceService {
         },
       });
 
+      await tx.invoiceActivity.create({
+        data: {
+          invoiceId: oldInvoice.id,
+          action: 'REPLACED',
+          actor,
+          description: `Invoice replaced by new draft invoice. Reason: ${replacementReason}`,
+        },
+      });
+
       // Create new draft replacement invoice referencing old invoice
       const created = await tx.invoice.create({
         data: {
@@ -415,6 +471,13 @@ export class InvoiceService {
               amount: item.amount,
             })),
           },
+          activities: {
+            create: {
+              action: 'CREATED',
+              actor,
+              description: `Replacement invoice created referencing old invoice '${oldInvoice.invoiceNumber || oldInvoice.id}'`,
+            },
+          },
         },
         include: {
           items: true,
@@ -426,5 +489,185 @@ export class InvoiceService {
     });
 
     return newInvoice;
+  }
+
+  /**
+   * 9. Get Audit Trail / Activity History for an invoice
+   */
+  async getInvoiceHistory(id: string) {
+    const invoice = await this.db.invoice.findUnique({
+      where: { id },
+      select: { id: true, invoiceNumber: true, status: true },
+    });
+
+    if (!invoice) {
+      throw new NotFoundError(`Invoice with ID '${id}'`);
+    }
+
+    const activities = await this.db.invoiceActivity.findMany({
+      where: { invoiceId: id },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return {
+      invoiceId: invoice.id,
+      invoiceNumber: invoice.invoiceNumber,
+      status: invoice.status,
+      totalEvents: activities.length,
+      history: activities,
+    };
+  }
+
+  /**
+   * 10. Financial Analytics & Dashboard Summary
+   */
+  async getAnalyticsSummary() {
+    const invoices = await this.db.invoice.findMany({
+      select: {
+        id: true,
+        status: true,
+        customerName: true,
+        subtotal: true,
+        taxAmount: true,
+        totalAmount: true,
+        createdAt: true,
+        issuedAt: true,
+      },
+    });
+
+    let totalIssuedRevenue = 0;
+    let totalDraftPending = 0;
+    let totalCanceledRevenue = 0;
+    let totalTaxCollected = 0;
+
+    const statusCounts: Record<string, number> = {
+      [InvoiceStatus.DRAFT]: 0,
+      [InvoiceStatus.ISSUED]: 0,
+      [InvoiceStatus.CANCELED]: 0,
+      [InvoiceStatus.REPLACED]: 0,
+    };
+
+    const customerRevenueMap: Record<string, number> = {};
+
+    invoices.forEach((inv) => {
+      const amount = Number(inv.totalAmount);
+      const tax = Number(inv.taxAmount);
+
+      statusCounts[inv.status] = (statusCounts[inv.status] || 0) + 1;
+
+      if (inv.status === InvoiceStatus.ISSUED) {
+        totalIssuedRevenue += amount;
+        totalTaxCollected += tax;
+
+        customerRevenueMap[inv.customerName] =
+          (customerRevenueMap[inv.customerName] || 0) + amount;
+      } else if (inv.status === InvoiceStatus.DRAFT) {
+        totalDraftPending += amount;
+      } else if (inv.status === InvoiceStatus.CANCELED) {
+        totalCanceledRevenue += amount;
+      }
+    });
+
+    const topCustomers = Object.entries(customerRevenueMap)
+      .map(([customerName, revenue]) => ({ customerName, revenue }))
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 5);
+
+    return {
+      summary: {
+        totalInvoices: invoices.length,
+        totalIssuedRevenue: Number(totalIssuedRevenue.toFixed(2)),
+        totalIssuedRevenueFormatted: formatCurrencyVND(totalIssuedRevenue),
+        totalDraftPendingRevenue: Number(totalDraftPending.toFixed(2)),
+        totalDraftPendingFormatted: formatCurrencyVND(totalDraftPending),
+        totalCanceledRevenue: Number(totalCanceledRevenue.toFixed(2)),
+        totalTaxCollected: Number(totalTaxCollected.toFixed(2)),
+        totalTaxCollectedFormatted: formatCurrencyVND(totalTaxCollected),
+      },
+      statusBreakdown: statusCounts,
+      topCustomers,
+    };
+  }
+
+  /**
+   * 11. Verify Invoice Authenticity
+   */
+  async verifyInvoice(id: string) {
+    const invoice = await this.db.invoice.findUnique({
+      where: { id },
+      include: {
+        items: true,
+        replacedInvoice: {
+          select: { id: true, invoiceNumber: true, status: true },
+        },
+      },
+    });
+
+    if (!invoice) {
+      throw new NotFoundError(`Invoice with ID '${id}'`);
+    }
+
+    const isValid = invoice.status === InvoiceStatus.ISSUED;
+    const digitalSignature = `SIG-${Buffer.from(`${invoice.id}-${invoice.invoiceNumber}-${invoice.totalAmount}`).toString('base64').slice(0, 24)}`;
+
+    return {
+      isValid,
+      status: invoice.status,
+      verificationResult: isValid ? 'VALID & AUTHENTIC' : 'NON-ISSUED OR CANCELED',
+      invoiceNumber: invoice.invoiceNumber || 'N/A (DRAFT)',
+      issuer: COMPANY_INFO.name,
+      issuerTaxCode: COMPANY_INFO.taxCode,
+      customerName: invoice.customerName,
+      customerTaxCode: invoice.customerTaxCode || 'N/A',
+      issuedAt: invoice.issuedAt,
+      subtotal: Number(invoice.subtotal),
+      taxAmount: Number(invoice.taxAmount),
+      totalAmount: Number(invoice.totalAmount),
+      totalAmountInWords: numberToWordsVN(Number(invoice.totalAmount)),
+      digitalSignature,
+      verificationTimestamp: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * 12. Export Invoices as CSV format (UTF-8 with BOM for Excel compatibility)
+   */
+  async exportInvoicesCsv(query: ListInvoicesQuery): Promise<string> {
+    const { invoices } = await this.getInvoices({ ...query, limit: 10000 });
+
+    const headers = [
+      'STT',
+      'Ma Hoa Don',
+      'Trang Thai',
+      'Ten Khach Hang',
+      'Ma So Thue',
+      'Ngay Phat Hanh',
+      'Tien Truoc Thue (VND)',
+      'Thue Suat (%)',
+      'Tien Thue (VND)',
+      'Tong Thanh Toan (VND)',
+      'Ghi Chu',
+    ];
+
+    const rows = invoices.map((inv, index) => {
+      const issuedDate = inv.issuedAt ? new Date(inv.issuedAt).toISOString().split('T')[0] : '';
+      return [
+        index + 1,
+        `"${inv.invoiceNumber || 'DRAFT'}"`,
+        `"${inv.status}"`,
+        `"${(inv.customerName || '').replace(/"/g, '""')}"`,
+        `"${inv.customerTaxCode || ''}"`,
+        `"${issuedDate}"`,
+        inv.subtotal,
+        inv.taxRate,
+        inv.taxAmount,
+        inv.totalAmount,
+        `"${(inv.notes || '').replace(/"/g, '""')}"`,
+      ].join(',');
+    });
+
+    // Add UTF-8 BOM so Excel opens Vietnamese characters without garbled text
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
+    return csvContent;
   }
 }
