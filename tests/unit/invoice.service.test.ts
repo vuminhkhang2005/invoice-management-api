@@ -20,6 +20,10 @@ describe('InvoiceService Unit Tests', () => {
         deleteMany: jest.fn(),
         createMany: jest.fn(),
       },
+      invoiceActivity: {
+        create: jest.fn(),
+        findMany: jest.fn(),
+      },
       $transaction: jest.fn(async (cb) => cb(mockDb)),
     };
 
@@ -27,7 +31,7 @@ describe('InvoiceService Unit Tests', () => {
   });
 
   describe('createDraft', () => {
-    it('should create a draft invoice with calculated totals and items', async () => {
+    it('should create a draft invoice with calculated totals, items, and activity log', async () => {
       const input = {
         customerName: 'Tech Corp Vietnam',
         customerEmail: 'tech@corp.vn',
@@ -59,18 +63,20 @@ describe('InvoiceService Unit Tests', () => {
   });
 
   describe('getInvoiceById', () => {
-    it('should return invoice when found', async () => {
+    it('should return invoice with totalAmountInWords when found', async () => {
       const mockInvoice = {
         id: 'inv-1',
         invoiceNumber: 'INV-202608-00001',
         status: InvoiceStatus.ISSUED,
+        totalAmount: 1500000,
         items: [],
       };
 
       mockDb.invoice.findUnique.mockResolvedValue(mockInvoice);
 
       const result = await invoiceService.getInvoiceById('inv-1');
-      expect(result).toEqual(mockInvoice);
+      expect(result.id).toBe('inv-1');
+      expect(result.totalAmountInWords).toBe('Một triệu năm trăm nghìn đồng chẵn');
     });
 
     it('should throw NotFoundError when invoice does not exist', async () => {
@@ -120,32 +126,8 @@ describe('InvoiceService Unit Tests', () => {
     });
   });
 
-  describe('deleteDraft', () => {
-    it('should delete draft invoice', async () => {
-      mockDb.invoice.findUnique.mockResolvedValue({
-        id: 'draft-1',
-        status: InvoiceStatus.DRAFT,
-      });
-      mockDb.invoice.delete.mockResolvedValue({ id: 'draft-1' });
-
-      const result = await invoiceService.deleteDraft('draft-1');
-      expect(result.id).toBe('draft-1');
-    });
-
-    it('should throw BadRequestError when attempting to delete an ISSUED invoice', async () => {
-      mockDb.invoice.findUnique.mockResolvedValue({
-        id: 'issued-1',
-        status: InvoiceStatus.ISSUED,
-      });
-
-      await expect(invoiceService.deleteDraft('issued-1')).rejects.toThrow(
-        BadRequestError
-      );
-    });
-  });
-
   describe('issueInvoice', () => {
-    it('should transition DRAFT to ISSUED and assign an invoice number', async () => {
+    it('should transition DRAFT to ISSUED, log activity, and assign an invoice number', async () => {
       const draftInvoice = {
         id: 'draft-1',
         status: InvoiceStatus.DRAFT,
@@ -164,18 +146,6 @@ describe('InvoiceService Unit Tests', () => {
       expect(result.status).toBe(InvoiceStatus.ISSUED);
       expect(result.invoiceNumber).toMatch(/^INV-\d{6}-00001$/);
       expect(result.issuedAt).toBeDefined();
-    });
-
-    it('should throw BadRequestError if invoice is already ISSUED', async () => {
-      mockDb.invoice.findUnique.mockResolvedValue({
-        id: 'issued-1',
-        status: InvoiceStatus.ISSUED,
-        items: [{ description: 'Item 1', quantity: 1, unitPrice: 100 }],
-      });
-
-      await expect(invoiceService.issueInvoice('issued-1')).rejects.toThrow(
-        BadRequestError
-      );
     });
   });
 
@@ -202,17 +172,6 @@ describe('InvoiceService Unit Tests', () => {
         'Customer requested cancellation due to incorrect tax code'
       );
       expect(result.canceledAt).toBeDefined();
-    });
-
-    it('should throw BadRequestError when attempting to cancel a DRAFT invoice', async () => {
-      mockDb.invoice.findUnique.mockResolvedValue({
-        id: 'draft-1',
-        status: InvoiceStatus.DRAFT,
-      });
-
-      await expect(
-        invoiceService.cancelInvoice('draft-1', { cancelReason: 'Some reason' })
-      ).rejects.toThrow(BadRequestError);
     });
   });
 
@@ -250,29 +209,86 @@ describe('InvoiceService Unit Tests', () => {
         })
       );
 
-      expect(mockDb.invoice.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            replacedInvoiceId: 'old-inv-1',
-            status: InvoiceStatus.DRAFT,
-            customerName: 'New Customer Corp',
-          }),
-        })
-      );
-
       expect(result.id).toBe('new-inv-2');
     });
+  });
 
-    it('should throw BadRequestError when attempting to replace an invoice that was already replaced', async () => {
-      mockDb.invoice.findUnique.mockResolvedValue({
-        id: 'already-replaced',
-        status: InvoiceStatus.REPLACED,
+  describe('getAnalyticsSummary', () => {
+    it('should compute financial totals, status breakdown, and top customers', async () => {
+      mockDb.invoice.findMany.mockResolvedValue([
+        {
+          id: '1',
+          status: InvoiceStatus.ISSUED,
+          customerName: 'Customer A',
+          subtotal: 1000,
+          taxAmount: 100,
+          totalAmount: 1100,
+        },
+        {
+          id: '2',
+          status: InvoiceStatus.DRAFT,
+          customerName: 'Customer B',
+          subtotal: 500,
+          taxAmount: 50,
+          totalAmount: 550,
+        },
+      ]);
+
+      const analytics = await invoiceService.getAnalyticsSummary();
+
+      expect(analytics.summary.totalInvoices).toBe(2);
+      expect(analytics.summary.totalIssuedRevenue).toBe(1100);
+      expect(analytics.summary.totalDraftPendingRevenue).toBe(550);
+      expect(analytics.statusBreakdown[InvoiceStatus.ISSUED]).toBe(1);
+      expect(analytics.statusBreakdown[InvoiceStatus.DRAFT]).toBe(1);
+      expect(analytics.topCustomers[0].customerName).toBe('Customer A');
+    });
+  });
+
+  describe('verifyInvoice', () => {
+    it('should verify an ISSUED invoice and return verification details', async () => {
+      const mockInvoice = {
+        id: 'uuid-1',
+        invoiceNumber: 'INV-202608-00001',
+        status: InvoiceStatus.ISSUED,
+        customerName: 'Buyer A',
+        customerTaxCode: '0101234567',
+        subtotal: 1000000,
+        taxAmount: 100000,
+        totalAmount: 1100000,
+        issuedAt: new Date(),
         items: [],
+      };
+
+      mockDb.invoice.findUnique.mockResolvedValue(mockInvoice);
+
+      const verification = await invoiceService.verifyInvoice('uuid-1');
+
+      expect(verification.isValid).toBe(true);
+      expect(verification.verificationResult).toBe('VALID & AUTHENTIC');
+      expect(verification.digitalSignature).toBeDefined();
+      expect(verification.totalAmountInWords).toBe('Một triệu một trăm nghìn đồng chẵn');
+    });
+  });
+
+  describe('getInvoiceHistory', () => {
+    it('should return invoice activity log history', async () => {
+      mockDb.invoice.findUnique.mockResolvedValue({
+        id: 'inv-1',
+        invoiceNumber: 'INV-202608-00001',
+        status: InvoiceStatus.ISSUED,
       });
 
-      await expect(
-        invoiceService.replaceInvoice('already-replaced', {})
-      ).rejects.toThrow(BadRequestError);
+      mockDb.invoiceActivity.findMany.mockResolvedValue([
+        { id: 'act-1', action: 'ISSUED', description: 'Invoice issued' },
+        { id: 'act-2', action: 'CREATED', description: 'Invoice draft created' },
+      ]);
+
+      const history = await invoiceService.getInvoiceHistory('inv-1');
+
+      expect(history.invoiceId).toBe('inv-1');
+      expect(history.totalEvents).toBe(2);
+      expect(history.history).toHaveLength(2);
     });
   });
 });

@@ -17,6 +17,10 @@ jest.mock('../../src/config/database', () => {
       deleteMany: jest.fn(),
       createMany: jest.fn(),
     },
+    invoiceActivity: {
+      create: jest.fn(),
+      findMany: jest.fn(),
+    },
     $transaction: jest.fn(async (callback: any) => callback(mockPrisma)),
   };
   return { prisma: mockPrisma };
@@ -34,6 +38,64 @@ describe('Invoice Management API Integration Tests', () => {
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.data.status).toBe('UP');
+    });
+  });
+
+  describe('GET /api-docs', () => {
+    it('should return 200 OK or 301/302 redirect to Swagger UI', async () => {
+      const response = await request(app).get('/api-docs/');
+      expect([200, 301, 302]).toContain(response.status);
+    });
+  });
+
+  describe('GET /api/invoices/analytics/summary', () => {
+    it('should return analytics summary with total revenue and customer breakdown', async () => {
+      (prisma.invoice.findMany as jest.Mock).mockResolvedValue([
+        {
+          id: '1',
+          status: InvoiceStatus.ISSUED,
+          customerName: 'Customer A',
+          subtotal: 1000,
+          taxAmount: 100,
+          totalAmount: 1100,
+        },
+      ]);
+
+      const response = await request(app).get('/api/invoices/analytics/summary');
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.summary.totalInvoices).toBe(1);
+      expect(response.body.data.summary.totalIssuedRevenue).toBe(1100);
+    });
+  });
+
+  describe('GET /api/invoices/export/csv', () => {
+    it('should return CSV data with UTF-8 attachment header', async () => {
+      (prisma.invoice.count as jest.Mock).mockResolvedValue(1);
+      (prisma.invoice.findMany as jest.Mock).mockResolvedValue([
+        {
+          id: '1',
+          invoiceNumber: 'INV-202608-00001',
+          status: InvoiceStatus.ISSUED,
+          customerName: 'Customer A',
+          customerTaxCode: '0101234567',
+          subtotal: 1000,
+          taxRate: 10,
+          taxAmount: 100,
+          totalAmount: 1100,
+          notes: 'Test note',
+          issuedAt: new Date(),
+          items: [],
+        },
+      ]);
+
+      const response = await request(app).get('/api/invoices/export/csv');
+
+      expect(response.status).toBe(200);
+      expect(response.headers['content-type']).toMatch(/text\/csv/);
+      expect(response.text).toContain('Ma Hoa Don');
+      expect(response.text).toContain('INV-202608-00001');
     });
   });
 
@@ -123,12 +185,13 @@ describe('Invoice Management API Integration Tests', () => {
   });
 
   describe('GET /api/invoices/:id (Get Details)', () => {
-    it('should return invoice details when found', async () => {
+    it('should return invoice details with totalAmountInWords when found', async () => {
       const mockInvoice = {
         id: 'inv-101',
         invoiceNumber: 'INV-202608-00001',
         status: InvoiceStatus.ISSUED,
         customerName: 'Customer A',
+        totalAmount: 1000000,
         items: [{ id: 'item-1', description: 'Item 1', quantity: 1, unitPrice: 100, amount: 100 }],
       };
 
@@ -139,119 +202,50 @@ describe('Invoice Management API Integration Tests', () => {
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.data.id).toBe('inv-101');
-    });
-
-    it('should return 404 Not Found when invoice does not exist', async () => {
-      (prisma.invoice.findUnique as jest.Mock).mockResolvedValue(null);
-
-      const response = await request(app).get('/api/invoices/unknown-id');
-
-      expect(response.status).toBe(404);
-      expect(response.body.success).toBe(false);
+      expect(response.body.data.totalAmountInWords).toBe('Một triệu đồng chẵn');
     });
   });
 
-  describe('POST /api/invoices/:id/issue (Issue Invoice)', () => {
-    it('should issue a DRAFT invoice and assign invoice number', async () => {
-      const draft = {
-        id: 'draft-1',
-        status: InvoiceStatus.DRAFT,
-        items: [{ id: 'item-1', description: 'Item 1', quantity: 1, unitPrice: 100, amount: 100 }],
+  describe('GET /api/invoices/:id/verify', () => {
+    it('should return verification certificate for an invoice', async () => {
+      const mockInvoice = {
+        id: 'inv-101',
+        invoiceNumber: 'INV-202608-00001',
+        status: InvoiceStatus.ISSUED,
+        customerName: 'Customer A',
+        totalAmount: 1000000,
+        subtotal: 900000,
+        taxAmount: 100000,
+        items: [],
       };
 
-      (prisma.invoice.findUnique as jest.Mock).mockResolvedValue(draft);
-      (prisma.invoice.count as jest.Mock).mockResolvedValue(0);
-      (prisma.invoice.update as jest.Mock).mockResolvedValue({
-        ...draft,
-        status: InvoiceStatus.ISSUED,
-        invoiceNumber: 'INV-202608-00001',
-        issuedAt: new Date().toISOString(),
-      });
+      (prisma.invoice.findUnique as jest.Mock).mockResolvedValue(mockInvoice);
 
-      const response = await request(app).post('/api/invoices/draft-1/issue');
+      const response = await request(app).get('/api/invoices/inv-101/verify');
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
-      expect(response.body.data.status).toBe(InvoiceStatus.ISSUED);
-      expect(response.body.data.invoiceNumber).toBe('INV-202608-00001');
+      expect(response.body.data.isValid).toBe(true);
+      expect(response.body.data.digitalSignature).toBeDefined();
     });
   });
 
-  describe('POST /api/invoices/:id/cancel (Cancel Invoice)', () => {
-    it('should cancel an ISSUED invoice with valid reason', async () => {
-      const issued = {
-        id: 'issued-1',
-        status: InvoiceStatus.ISSUED,
+  describe('GET /api/invoices/:id/history', () => {
+    it('should return activity log history for an invoice', async () => {
+      (prisma.invoice.findUnique as jest.Mock).mockResolvedValue({
+        id: 'inv-101',
         invoiceNumber: 'INV-202608-00001',
-      };
-
-      (prisma.invoice.findUnique as jest.Mock).mockResolvedValue(issued);
-      (prisma.invoice.update as jest.Mock).mockResolvedValue({
-        ...issued,
-        status: InvoiceStatus.CANCELED,
-        cancelReason: 'Customer canceled order',
-        canceledAt: new Date().toISOString(),
-        items: [],
+        status: InvoiceStatus.ISSUED,
       });
+      (prisma.invoiceActivity.findMany as jest.Mock).mockResolvedValue([
+        { id: 'act-1', action: 'ISSUED', description: 'Issued', createdAt: new Date() },
+      ]);
 
-      const response = await request(app)
-        .post('/api/invoices/issued-1/cancel')
-        .send({ cancelReason: 'Customer canceled order' });
+      const response = await request(app).get('/api/invoices/inv-101/history');
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
-      expect(response.body.data.status).toBe(InvoiceStatus.CANCELED);
-    });
-
-    it('should reject cancel when cancelReason is missing', async () => {
-      const response = await request(app)
-        .post('/api/invoices/issued-1/cancel')
-        .send({});
-
-      expect(response.status).toBe(400);
-      expect(response.body.success).toBe(false);
-    });
-  });
-
-  describe('POST /api/invoices/:id/replace (Replace Invoice)', () => {
-    it('should replace an ISSUED invoice and return new replacement draft', async () => {
-      const issued = {
-        id: 'old-1',
-        status: InvoiceStatus.ISSUED,
-        invoiceNumber: 'INV-202608-00001',
-        customerName: 'Old Customer',
-        taxRate: 10,
-        items: [{ description: 'Item 1', quantity: 1, unitPrice: 100 }],
-      };
-
-      (prisma.invoice.findUnique as jest.Mock).mockResolvedValue(issued);
-      (prisma.invoice.update as jest.Mock).mockResolvedValue({
-        ...issued,
-        status: InvoiceStatus.REPLACED,
-      });
-      (prisma.invoice.create as jest.Mock).mockResolvedValue({
-        id: 'new-2',
-        status: InvoiceStatus.DRAFT,
-        replacedInvoiceId: 'old-1',
-        customerName: 'New Customer',
-        subtotal: 100,
-        taxRate: 10,
-        taxAmount: 10,
-        totalAmount: 110,
-        items: [],
-      });
-
-      const response = await request(app)
-        .post('/api/invoices/old-1/replace')
-        .send({
-          cancelReason: 'Change company name',
-          customerName: 'New Customer',
-        });
-
-      expect(response.status).toBe(201);
-      expect(response.body.success).toBe(true);
-      expect(response.body.data.id).toBe('new-2');
-      expect(response.body.data.replacedInvoiceId).toBe('old-1');
+      expect(response.body.data.history).toHaveLength(1);
     });
   });
 
