@@ -1,0 +1,77 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  CANCELED
+  REPLACED
+}
+
+model Invoice {
+  id                  String         @id @default(uuid())
+  invoiceNumber       String?        @unique @map("invoice_number")
+  status              InvoiceStatus  @default(DRAFT)
+  
+  // Customer / Buyer Information
+  customerName        String         @map("customer_name")
+  customerEmail       String?        @map("customer_email")
+  customerAddress     String?        @map("customer_address")
+  customerTaxCode     String?        @map("customer_tax_code")
+  
+  // Financial Information
+  subtotal            Decimal        @default(0) @db.Decimal(15, 2)
+  taxRate             Decimal        @default(10) @db.Decimal(5, 2)
+  taxAmount           Decimal        @default(0) @db.Decimal(15, 2)
+  totalAmount         Decimal        @default(0) @db.Decimal(15, 2)
+  
+  // Notes and Cancellation/Replacement reasons
+  notes               String?
+  cancelReason        String?        @map("cancel_reason")
+  
+  // Business timestamps
+  issuedAt            DateTime?      @map("issued_at")
+  canceledAt          DateTime?      @map("canceled_at")
+  
+  // Self-relation for Invoice Replacement
+  replacedInvoiceId   String?        @map("replaced_invoice_id")
+  replacedInvoice     Invoice?       @relation("InvoiceReplacementHistory", fields: [replacedInvoiceId], references: [id], onDelete: SetNull)
+  replacementInvoices Invoice[]      @relation("InvoiceReplacementHistory")
+  
+  // Line items
+  items               InvoiceItem[]
+  
+  createdAt           DateTime       @default(now()) @map("created_at")
+  updatedAt           DateTime       @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([customerName])
+  @@index([issuedAt])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id          String   @id @default(uuid())
+  invoiceId   String   @map("invoice_id")
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  
+  description String
+  quantity    Int      @default(1)
+  unitPrice   Decimal  @map("unit_price") @db.Decimal(15, 2)
+  amount      Decimal  @db.Decimal(15, 2)
+  
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([invoiceId])
+  @@map("invoice_items")
+}
