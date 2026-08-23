@@ -1,0 +1,242 @@
+{
+  "info": {
+    "_postman_id": "8e7c10b4-934d-4e92-bc2f-48e67a07c123",
+    "name": "Invoice Management API",
+    "description": "Comprehensive Postman Collection for testing Invoice Management RESTful API endpoints, including invoice lifecycle state machine (DRAFT -> ISSUED -> CANCELED / REPLACED), financial calculations, and PDF export.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "invoiceId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "System Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "health"]
+            },
+            "description": "Check if API service and server are running"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Invoice Operations",
+      "item": [
+        {
+          "name": "1. Create Draft Invoice",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData && jsonData.data && jsonData.data.id) {",
+                  "    pm.collectionVariables.set('invoiceId', jsonData.data.id);",
+                  "    console.log('Saved invoiceId:', jsonData.data.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Cong ty TNHH Cong Nghe Tuong Lai\",\n  \"customerEmail\": \"contact@tuonglai.tech\",\n  \"customerAddress\": \"Tang 8, Toa nha Keangnam, Pham Hung, Ha Noi\",\n  \"customerTaxCode\": \"0109988776\",\n  \"taxRate\": 10,\n  \"notes\": \"Thanh toan theo hop dong dich vu phan mem so HD-2026/08\",\n  \"items\": [\n    {\n      \"description\": \"Goi thiet ke kien truc Backend Cloud Microservices\",\n      \"quantity\": 1,\n      \"unitPrice\": 25000000\n    },\n    {\n      \"description\": \"Trien khai he thong CI/CD & Docker Kubernetes\",\n      \"quantity\": 2,\n      \"unitPrice\": 7500000\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "invoices"]
+            },
+            "description": "Create a new invoice in DRAFT status with calculated totals."
+          },
+          "response": []
+        },
+        {
+          "name": "2. Get Invoices (List & Filter)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices?page=1&limit=10&status=DRAFT",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "invoices"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "status",
+                  "value": "DRAFT"
+                },
+                {
+                  "key": "search",
+                  "value": "Tuong Lai",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Retrieve paginated list of invoices with optional search and status filtering."
+          },
+          "response": []
+        },
+        {
+          "name": "3. Get Invoice Details by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices/{{invoiceId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "invoices", "{{invoiceId}}"]
+            },
+            "description": "Retrieve full invoice details with line items and replacement relationship history."
+          },
+          "response": []
+        },
+        {
+          "name": "4. Update Draft Invoice",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Cong ty TNHH Cong Nghe Tuong Lai (Updated)\",\n  \"customerEmail\": \"finance@tuonglai.tech\",\n  \"taxRate\": 8,\n  \"items\": [\n    {\n      \"description\": \"Goi tu van va thiet ke Backend Cloud (Da dieu chinh)\",\n      \"quantity\": 1,\n      \"unitPrice\": 30000000\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices/{{invoiceId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "invoices", "{{invoiceId}}"]
+            },
+            "description": "Update details and line items of a DRAFT invoice. Blocked for ISSUED/CANCELED/REPLACED invoices."
+          },
+          "response": []
+        },
+        {
+          "name": "5. Issue Invoice (DRAFT -> ISSUED)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices/{{invoiceId}}/issue",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "invoices", "{{invoiceId}}", "issue"]
+            },
+            "description": "Officially issue an invoice: assigns sequential invoice number (e.g. INV-202608-00001), records issuedAt timestamp, and permanently locks edits."
+          },
+          "response": []
+        },
+        {
+          "name": "6. Download / View PDF Invoice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices/{{invoiceId}}/pdf",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "invoices", "{{invoiceId}}", "pdf"]
+            },
+            "description": "Generate and stream vector PDF invoice with company details, buyer info, items table, and status badges."
+          },
+          "response": []
+        },
+        {
+          "name": "7. Cancel Invoice (ISSUED -> CANCELED)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cancelReason\": \"Khach hang thay doi MST doanh nghiep va yeu cau lap hoa don thay the\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices/{{invoiceId}}/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "invoices", "{{invoiceId}}", "cancel"]
+            },
+            "description": "Cancel an issued invoice. Requires mandatory cancelReason."
+          },
+          "response": []
+        },
+        {
+          "name": "8. Replace Invoice (ISSUED/CANCELED -> REPLACED)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cancelReason\": \"Thay the do sai thong tin Ma so thue\",\n  \"customerName\": \"Cong ty TNHH Cong Nghe Tuong Lai Viet Nam\",\n  \"customerTaxCode\": \"0109988776-001\",\n  \"taxRate\": 10,\n  \"items\": [\n    {\n      \"description\": \"Goi thiet ke kien truc Backend Cloud Microservices\",\n      \"quantity\": 1,\n      \"unitPrice\": 25000000\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices/{{invoiceId}}/replace",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "invoices", "{{invoiceId}}", "replace"]
+            },
+            "description": "Mark original invoice as REPLACED and create a new replacement invoice linking replacedInvoiceId."
+          },
+          "response": []
+        },
+        {
+          "name": "9. Delete Draft Invoice",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices/{{invoiceId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "invoices", "{{invoiceId}}"]
+            },
+            "description": "Delete draft invoice. Blocked for ISSUED/CANCELED/REPLACED invoices to ensure audit compliance."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
