@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { prisma as defaultPrisma } from '../config/database';
 import { InvoiceStatus } from '../constants/invoice.constant';
-import { AppError, BadRequestError, NotFoundError } from '../errors/appError';
+import { BadRequestError, NotFoundError } from '../errors/appError';
 import {
   CreateInvoiceInput,
   UpdateInvoiceInput,
