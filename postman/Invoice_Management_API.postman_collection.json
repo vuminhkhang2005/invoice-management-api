@@ -1,8 +1,8 @@
 {
   "info": {
     "_postman_id": "8e7c10b4-934d-4e92-bc2f-48e67a07c123",
-    "name": "Invoice Management API",
-    "description": "Comprehensive Postman Collection for testing Invoice Management RESTful API endpoints, including invoice lifecycle state machine (DRAFT -> ISSUED -> CANCELED / REPLACED), financial calculations, and PDF export.",
+    "name": "Invoice Management API - Enterprise Edition",
+    "description": "Comprehensive Postman Collection for testing Invoice Management RESTful API endpoints, including invoice lifecycle state machine (DRAFT -> ISSUED -> CANCELED / REPLACED), financial calculations, PDF export, VietQR, Analytics, and Audit logs.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -19,7 +19,7 @@
   ],
   "item": [
     {
-      "name": "System Health",
+      "name": "System & Documentation",
       "item": [
         {
           "name": "Health Check",
@@ -32,6 +32,20 @@
               "path": ["api", "health"]
             },
             "description": "Check if API service and server are running"
+          },
+          "response": []
+        },
+        {
+          "name": "Swagger UI Documentation",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api-docs",
+              "host": ["{{baseUrl}}"],
+              "path": ["api-docs"]
+            },
+            "description": "Access interactive OpenAPI 3.0 Swagger UI"
           },
           "response": []
         }
@@ -121,7 +135,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["api", "invoices", "{{invoiceId}}"]
             },
-            "description": "Retrieve full invoice details with line items and replacement relationship history."
+            "description": "Retrieve full invoice details with line items, Vietnamese amount in words, and replacement relationship history."
           },
           "response": []
         },
@@ -172,12 +186,40 @@
               "host": ["{{baseUrl}}"],
               "path": ["api", "invoices", "{{invoiceId}}", "pdf"]
             },
-            "description": "Generate and stream vector PDF invoice with company details, buyer info, items table, and status badges."
+            "description": "Generate and stream vector PDF invoice with company details, buyer info, items table, VietQR, and status badges."
           },
           "response": []
         },
         {
-          "name": "7. Cancel Invoice (ISSUED -> CANCELED)",
+          "name": "7. Verify Invoice Authenticity",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices/{{invoiceId}}/verify",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "invoices", "{{invoiceId}}", "verify"]
+            },
+            "description": "Verify legality, issuer information, digital signature, and validity of an electronic invoice."
+          },
+          "response": []
+        },
+        {
+          "name": "8. Get Invoice Audit History Trail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices/{{invoiceId}}/history",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "invoices", "{{invoiceId}}", "history"]
+            },
+            "description": "Retrieve chronological audit activity history logs for an invoice."
+          },
+          "response": []
+        },
+        {
+          "name": "9. Cancel Invoice (ISSUED -> CANCELED)",
           "request": {
             "method": "POST",
             "header": [
@@ -200,7 +242,7 @@
           "response": []
         },
         {
-          "name": "8. Replace Invoice (ISSUED/CANCELED -> REPLACED)",
+          "name": "10. Replace Invoice (ISSUED/CANCELED -> REPLACED)",
           "request": {
             "method": "POST",
             "header": [
@@ -223,7 +265,7 @@
           "response": []
         },
         {
-          "name": "9. Delete Draft Invoice",
+          "name": "11. Delete Draft Invoice",
           "request": {
             "method": "DELETE",
             "header": [],
@@ -233,6 +275,45 @@
               "path": ["api", "invoices", "{{invoiceId}}"]
             },
             "description": "Delete draft invoice. Blocked for ISSUED/CANCELED/REPLACED invoices to ensure audit compliance."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Analytics & Reports",
+      "item": [
+        {
+          "name": "1. Financial Dashboard & Analytics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices/analytics/summary",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "invoices", "analytics", "summary"]
+            },
+            "description": "Get summary metrics, revenue totals, status breakdown, and top customers by revenue."
+          },
+          "response": []
+        },
+        {
+          "name": "2. Export Invoices CSV Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices/export/csv?status=ISSUED",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "invoices", "export", "csv"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "ISSUED"
+                }
+              ]
+            },
+            "description": "Download Excel-compatible UTF-8 BOM CSV invoice register report."
           },
           "response": []
         }
