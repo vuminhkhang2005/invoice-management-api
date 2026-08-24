@@ -1,13 +1,17 @@
 import { app } from './app';
 import { env } from './config/env';
 import { ensurePostgresServer } from './config/embeddedDb';
+import { connectPrismaWithRetry } from './config/database';
 
 async function bootstrap() {
   try {
     // 1. Ensure PostgreSQL is accessible or start embedded engine
     await ensurePostgresServer(5432);
 
-    // 2. Start HTTP Express Server
+    // 2. Connect Prisma with retry
+    await connectPrismaWithRetry(5, 1000);
+
+    // 3. Start HTTP Express Server
     const server = app.listen(env.PORT, () => {
       console.log(`🚀 Invoice Management Server is running on http://localhost:${env.PORT}`);
       console.log(`📡 Environment: ${env.NODE_ENV}`);
