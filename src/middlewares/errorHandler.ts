@@ -25,7 +25,16 @@ export function errorHandler(
     return;
   }
 
-  // Prisma Known Request Errors
+  // Prisma Errors
+  if (err.name === 'PrismaClientInitializationError') {
+    sendError(
+      res,
+      'Database connection failed: Cannot reach PostgreSQL server at localhost:5432. Please ensure your PostgreSQL service or Docker container is running.',
+      503
+    );
+    return;
+  }
+
   if (err.name === 'PrismaClientKnownRequestError') {
     const prismaError = err as any;
     if (prismaError.code === 'P2002') {
