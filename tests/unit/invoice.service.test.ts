@@ -62,6 +62,33 @@ describe('InvoiceService Unit Tests', () => {
     });
   });
 
+  describe('getInvoices', () => {
+    it('should query and return paginated list of invoices with filters', async () => {
+      mockDb.invoice.count.mockResolvedValue(1);
+      mockDb.invoice.findMany.mockResolvedValue([
+        {
+          id: 'inv-1',
+          status: InvoiceStatus.ISSUED,
+          customerName: 'Tech Corp',
+          items: [],
+        },
+      ]);
+
+      const result = await invoiceService.getInvoices({
+        page: 1,
+        limit: 10,
+        status: InvoiceStatus.ISSUED,
+        search: 'Tech',
+        startDate: '2026-08-01',
+        endDate: '2026-08-31',
+      });
+
+      expect(result.total).toBe(1);
+      expect(result.page).toBe(1);
+      expect(result.invoices).toHaveLength(1);
+    });
+  });
+
   describe('getInvoiceById', () => {
     it('should return invoice with totalAmountInWords when found', async () => {
       const mockInvoice = {
@@ -126,6 +153,34 @@ describe('InvoiceService Unit Tests', () => {
     });
   });
 
+  describe('deleteDraft', () => {
+    it('should delete a DRAFT invoice successfully', async () => {
+      const existingDraft = {
+        id: 'draft-1',
+        status: InvoiceStatus.DRAFT,
+      };
+
+      mockDb.invoice.findUnique.mockResolvedValue(existingDraft);
+      mockDb.invoice.delete.mockResolvedValue(existingDraft);
+
+      const result = await invoiceService.deleteDraft('draft-1');
+      expect(result.id).toBe('draft-1');
+    });
+
+    it('should throw BadRequestError when attempting to delete an ISSUED invoice', async () => {
+      const existingIssued = {
+        id: 'issued-1',
+        status: InvoiceStatus.ISSUED,
+      };
+
+      mockDb.invoice.findUnique.mockResolvedValue(existingIssued);
+
+      await expect(invoiceService.deleteDraft('issued-1')).rejects.toThrow(
+        BadRequestError
+      );
+    });
+  });
+
   describe('issueInvoice', () => {
     it('should transition DRAFT to ISSUED, log activity, and assign an invoice number', async () => {
       const draftInvoice = {
@@ -146,6 +201,15 @@ describe('InvoiceService Unit Tests', () => {
       expect(result.status).toBe(InvoiceStatus.ISSUED);
       expect(result.invoiceNumber).toMatch(/^INV-\d{6}-00001$/);
       expect(result.issuedAt).toBeDefined();
+    });
+
+    it('should throw BadRequestError if invoice is not in DRAFT status', async () => {
+      mockDb.invoice.findUnique.mockResolvedValue({
+        id: 'inv-1',
+        status: InvoiceStatus.ISSUED,
+      });
+
+      await expect(invoiceService.issueInvoice('inv-1')).rejects.toThrow(BadRequestError);
     });
   });
 
@@ -172,6 +236,17 @@ describe('InvoiceService Unit Tests', () => {
         'Customer requested cancellation due to incorrect tax code'
       );
       expect(result.canceledAt).toBeDefined();
+    });
+
+    it('should throw BadRequestError when attempting to cancel a DRAFT invoice', async () => {
+      mockDb.invoice.findUnique.mockResolvedValue({
+        id: 'draft-1',
+        status: InvoiceStatus.DRAFT,
+      });
+
+      await expect(
+        invoiceService.cancelInvoice('draft-1', { cancelReason: 'Test reason' })
+      ).rejects.toThrow(BadRequestError);
     });
   });
 
@@ -211,6 +286,17 @@ describe('InvoiceService Unit Tests', () => {
 
       expect(result.id).toBe('new-inv-2');
     });
+
+    it('should throw BadRequestError when attempting to replace a DRAFT invoice', async () => {
+      mockDb.invoice.findUnique.mockResolvedValue({
+        id: 'draft-1',
+        status: InvoiceStatus.DRAFT,
+      });
+
+      await expect(
+        invoiceService.replaceInvoice('draft-1', { customerName: 'New Corp' })
+      ).rejects.toThrow(BadRequestError);
+    });
   });
 
   describe('getAnalyticsSummary', () => {
@@ -242,6 +328,34 @@ describe('InvoiceService Unit Tests', () => {
       expect(analytics.statusBreakdown[InvoiceStatus.ISSUED]).toBe(1);
       expect(analytics.statusBreakdown[InvoiceStatus.DRAFT]).toBe(1);
       expect(analytics.topCustomers[0].customerName).toBe('Customer A');
+    });
+  });
+
+  describe('exportInvoicesCsv', () => {
+    it('should format invoice records into Excel-compatible CSV string', async () => {
+      mockDb.invoice.count.mockResolvedValue(1);
+      mockDb.invoice.findMany.mockResolvedValue([
+        {
+          id: '1',
+          invoiceNumber: 'INV-202608-00001',
+          status: InvoiceStatus.ISSUED,
+          customerName: 'Company ABC',
+          customerTaxCode: '0101234567',
+          subtotal: 1000,
+          taxRate: 10,
+          taxAmount: 100,
+          totalAmount: 1100,
+          notes: 'Test note',
+          issuedAt: new Date('2026-08-24'),
+          items: [],
+        },
+      ]);
+
+      const csv = await invoiceService.exportInvoicesCsv({ page: 1, limit: 10 });
+
+      expect(csv).toContain('Ma Hoa Don');
+      expect(csv).toContain('INV-202608-00001');
+      expect(csv).toContain('Company ABC');
     });
   });
 
