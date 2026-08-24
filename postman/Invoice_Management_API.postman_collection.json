@@ -1,14 +1,19 @@
 {
   "info": {
     "_postman_id": "8e7c10b4-934d-4e92-bc2f-48e67a07c123",
-    "name": "Invoice Management API - Enterprise Edition",
-    "description": "Comprehensive Postman Collection for testing Invoice Management RESTful API endpoints, including invoice lifecycle state machine (DRAFT -> ISSUED -> CANCELED / REPLACED), financial calculations, PDF export, VietQR, Analytics, and Audit logs.",
+    "name": "Invoice Management API - Grand Enterprise Edition",
+    "description": "Comprehensive Postman Collection for testing Invoice Management RESTful API endpoints, including invoice lifecycle state machine (DRAFT -> ISSUED -> CANCELED / REPLACED), financial calculations, PDF export, VietQR, Automated Email, Batch ZIP, JWT Auth, Analytics, and Audit logs.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     {
       "key": "baseUrl",
       "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "authToken",
+      "value": "",
       "type": "string"
     },
     {
@@ -19,10 +24,10 @@
   ],
   "item": [
     {
-      "name": "System & Documentation",
+      "name": "1. System & Authentication",
       "item": [
         {
-          "name": "Health Check",
+          "name": "1.1 Health Check",
           "request": {
             "method": "GET",
             "header": [],
@@ -31,12 +36,83 @@
               "host": ["{{baseUrl}}"],
               "path": ["api", "health"]
             },
-            "description": "Check if API service and server are running"
+            "description": "Check if API service and server are healthy"
           },
           "response": []
         },
         {
-          "name": "Swagger UI Documentation",
+          "name": "1.2 Get Demo Accounts & Pre-signed JWT Tokens",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData && jsonData.data && jsonData.data[0]) {",
+                  "    pm.collectionVariables.set('authToken', jsonData.data[0].token);",
+                  "    console.log('Saved admin authToken:', jsonData.data[0].token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/demo-accounts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "demo-accounts"]
+            },
+            "description": "Retrieve demo credentials and pre-signed tokens for all 4 roles (Admin, Chief Accountant, Accountant, Auditor)"
+          },
+          "response": []
+        },
+        {
+          "name": "1.3 Login (Generate JWT Token)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"chief.accountant@invoicetech.vn\",\n  \"name\": \"Tran Thi Truong\",\n  \"role\": \"CHIEF_ACCOUNTANT\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "description": "Authenticate user and receive signed JWT Bearer token"
+          },
+          "response": []
+        },
+        {
+          "name": "1.4 Get Current User Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "me"]
+            },
+            "description": "View authenticated user session details"
+          },
+          "response": []
+        },
+        {
+          "name": "1.5 Swagger UI Documentation",
           "request": {
             "method": "GET",
             "header": [],
@@ -52,10 +128,10 @@
       ]
     },
     {
-      "name": "Invoice Operations",
+      "name": "2. Core Invoice Operations",
       "item": [
         {
-          "name": "1. Create Draft Invoice",
+          "name": "2.1 Create Draft Invoice",
           "event": [
             {
               "listen": "test",
@@ -77,6 +153,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -93,32 +173,18 @@
           "response": []
         },
         {
-          "name": "2. Get Invoices (List & Filter)",
+          "name": "2.2 Get Invoices (List & Filter)",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/invoices?page=1&limit=10&status=DRAFT",
+              "raw": "{{baseUrl}}/api/invoices?page=1&limit=10&status=ISSUED",
               "host": ["{{baseUrl}}"],
               "path": ["api", "invoices"],
               "query": [
-                {
-                  "key": "page",
-                  "value": "1"
-                },
-                {
-                  "key": "limit",
-                  "value": "10"
-                },
-                {
-                  "key": "status",
-                  "value": "DRAFT"
-                },
-                {
-                  "key": "search",
-                  "value": "Tuong Lai",
-                  "disabled": true
-                }
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" },
+                { "key": "status", "value": "ISSUED" }
               ]
             },
             "description": "Retrieve paginated list of invoices with optional search and status filtering."
@@ -126,7 +192,7 @@
           "response": []
         },
         {
-          "name": "3. Get Invoice Details by ID",
+          "name": "2.3 Get Invoice Details by ID",
           "request": {
             "method": "GET",
             "header": [],
@@ -140,14 +206,11 @@
           "response": []
         },
         {
-          "name": "4. Update Draft Invoice",
+          "name": "2.4 Update Draft Invoice",
           "request": {
             "method": "PUT",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
+              { "key": "Content-Type", "value": "application/json" }
             ],
             "body": {
               "mode": "raw",
@@ -158,15 +221,17 @@
               "host": ["{{baseUrl}}"],
               "path": ["api", "invoices", "{{invoiceId}}"]
             },
-            "description": "Update details and line items of a DRAFT invoice. Blocked for ISSUED/CANCELED/REPLACED invoices."
+            "description": "Update details and line items of a DRAFT invoice."
           },
           "response": []
         },
         {
-          "name": "5. Issue Invoice (DRAFT -> ISSUED)",
+          "name": "2.5 Issue Invoice (DRAFT -> ISSUED)",
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{authToken}}" }
+            ],
             "url": {
               "raw": "{{baseUrl}}/api/invoices/{{invoiceId}}/issue",
               "host": ["{{baseUrl}}"],
@@ -177,7 +242,7 @@
           "response": []
         },
         {
-          "name": "6. Download / View PDF Invoice",
+          "name": "2.6 Download / View PDF Invoice",
           "request": {
             "method": "GET",
             "header": [],
@@ -191,7 +256,27 @@
           "response": []
         },
         {
-          "name": "7. Verify Invoice Authenticity",
+          "name": "2.7 Send Invoice via Email with PDF Attachment",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recipientEmail\": \"client@tuonglai.tech\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices/{{invoiceId}}/send-email",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "invoices", "{{invoiceId}}", "send-email"]
+            },
+            "description": "Send responsive HTML invoice notification with attached PDF file."
+          },
+          "response": []
+        },
+        {
+          "name": "2.8 Verify Invoice Authenticity",
           "request": {
             "method": "GET",
             "header": [],
@@ -205,7 +290,7 @@
           "response": []
         },
         {
-          "name": "8. Get Invoice Audit History Trail",
+          "name": "2.9 Get Invoice Audit History Trail",
           "request": {
             "method": "GET",
             "header": [],
@@ -219,14 +304,12 @@
           "response": []
         },
         {
-          "name": "9. Cancel Invoice (ISSUED -> CANCELED)",
+          "name": "2.10 Cancel Invoice (ISSUED -> CANCELED)",
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{authToken}}" }
             ],
             "body": {
               "mode": "raw",
@@ -242,14 +325,12 @@
           "response": []
         },
         {
-          "name": "10. Replace Invoice (ISSUED/CANCELED -> REPLACED)",
+          "name": "2.11 Replace Invoice (ISSUED/CANCELED -> REPLACED)",
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{authToken}}" }
             ],
             "body": {
               "mode": "raw",
@@ -265,7 +346,7 @@
           "response": []
         },
         {
-          "name": "11. Delete Draft Invoice",
+          "name": "2.12 Delete Draft Invoice",
           "request": {
             "method": "DELETE",
             "header": [],
@@ -274,17 +355,75 @@
               "host": ["{{baseUrl}}"],
               "path": ["api", "invoices", "{{invoiceId}}"]
             },
-            "description": "Delete draft invoice. Blocked for ISSUED/CANCELED/REPLACED invoices to ensure audit compliance."
+            "description": "Delete draft invoice. Blocked for ISSUED/CANCELED/REPLACED invoices."
           },
           "response": []
         }
       ]
     },
     {
-      "name": "Analytics & Reports",
+      "name": "3. Batch Operations & Export",
       "item": [
         {
-          "name": "1. Financial Dashboard & Analytics",
+          "name": "3.1 Batch Issue Invoices",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{authToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"invoiceIds\": [\n    \"draft-id-1\",\n    \"draft-id-2\"\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices/batch/issue",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "invoices", "batch", "issue"]
+            },
+            "description": "Batch issue multiple draft invoices in an atomic database transaction."
+          },
+          "response": []
+        },
+        {
+          "name": "3.2 Export Invoices as ZIP Bundle",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"invoiceIds\": []\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices/export/zip",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "invoices", "export", "zip"]
+            },
+            "description": "Download a single compressed .zip file containing all selected vector PDF invoices."
+          },
+          "response": []
+        },
+        {
+          "name": "3.3 Export Invoices CSV Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices/export/csv?status=ISSUED",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "invoices", "export", "csv"],
+              "query": [
+                { "key": "status", "value": "ISSUED" }
+              ]
+            },
+            "description": "Download Excel-compatible UTF-8 BOM CSV invoice register report."
+          },
+          "response": []
+        },
+        {
+          "name": "3.4 Financial Dashboard & Analytics",
           "request": {
             "method": "GET",
             "header": [],
@@ -294,26 +433,6 @@
               "path": ["api", "invoices", "analytics", "summary"]
             },
             "description": "Get summary metrics, revenue totals, status breakdown, and top customers by revenue."
-          },
-          "response": []
-        },
-        {
-          "name": "2. Export Invoices CSV Report",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/invoices/export/csv?status=ISSUED",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "invoices", "export", "csv"],
-              "query": [
-                {
-                  "key": "status",
-                  "value": "ISSUED"
-                }
-              ]
-            },
-            "description": "Download Excel-compatible UTF-8 BOM CSV invoice register report."
           },
           "response": []
         }
