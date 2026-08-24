@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { InvoiceController } from '../controllers/invoice.controller';
 import { validateBody, validateQuery } from '../middlewares/validateRequest';
+import { authenticate } from '../middlewares/auth.middleware';
 import {
   createInvoiceSchema,
   updateInvoiceSchema,
@@ -11,6 +12,9 @@ import {
 
 const router = Router();
 const controller = new InvoiceController();
+
+// Optional JWT authentication on all invoice routes (records actor name/role if provided)
+router.use(authenticate(false));
 
 // 1. Create Draft Invoice
 router.post('/', validateBody(createInvoiceSchema), controller.createDraft);
@@ -24,31 +28,40 @@ router.get('/analytics/summary', controller.getAnalyticsSummary);
 // 4. Export Invoices as CSV (Defined before /:id)
 router.get('/export/csv', validateQuery(listInvoicesQuerySchema), controller.exportCsv);
 
-// 5. Get Invoice Details by ID
+// 5. Export Multiple Invoices as ZIP bundle (Defined before /:id)
+router.post('/export/zip', controller.exportZip);
+
+// 6. Batch Issue Invoices (Defined before /:id)
+router.post('/batch/issue', controller.batchIssue);
+
+// 7. Get Invoice Details by ID
 router.get('/:id', controller.getInvoiceById);
 
-// 6. Get Invoice Audit Activity History
+// 8. Get Invoice Audit Activity History
 router.get('/:id/history', controller.getInvoiceHistory);
 
-// 7. Verify Invoice Authenticity & Digital Signature
+// 9. Verify Invoice Authenticity & Digital Signature
 router.get('/:id/verify', controller.verifyInvoice);
 
-// 8. Update Draft Invoice
+// 10. Send Invoice PDF via Email
+router.post('/:id/send-email', controller.sendInvoiceEmail);
+
+// 11. Update Draft Invoice
 router.put('/:id', validateBody(updateInvoiceSchema), controller.updateDraft);
 
-// 9. Delete Draft Invoice
+// 12. Delete Draft Invoice
 router.delete('/:id', controller.deleteDraft);
 
-// 10. Issue Invoice (DRAFT -> ISSUED)
+// 13. Issue Invoice (DRAFT -> ISSUED)
 router.post('/:id/issue', controller.issueInvoice);
 
-// 11. Cancel Invoice (ISSUED -> CANCELED)
+// 14. Cancel Invoice (ISSUED -> CANCELED)
 router.post('/:id/cancel', validateBody(cancelInvoiceSchema), controller.cancelInvoice);
 
-// 12. Replace Invoice (ISSUED/CANCELED -> REPLACED)
+// 15. Replace Invoice (ISSUED/CANCELED -> REPLACED)
 router.post('/:id/replace', validateBody(replaceInvoiceSchema), controller.replaceInvoice);
 
-// 13. Download PDF Invoice
+// 16. Download PDF Invoice
 router.get('/:id/pdf', controller.downloadPdf);
 
 export default router;

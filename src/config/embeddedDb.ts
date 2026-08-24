@@ -1,7 +1,8 @@
 import path from 'path';
 import fs from 'fs';
 import net from 'net';
-import EmbeddedPostgres from 'embedded-postgres';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const EmbeddedPostgres = require('embedded-postgres').default || require('embedded-postgres');
 
 const dataDir = path.resolve(process.cwd(), 'prisma/pg_native');
 

@@ -1,10 +1,10 @@
 export const swaggerDocument = {
   openapi: '3.0.3',
   info: {
-    title: 'Invoice Management API',
+    title: 'Invoice Management API - Grand Enterprise Edition',
     version: '1.0.0',
     description:
-      'Enterprise-grade RESTful API for Electronic Invoice Management with Lifecycle State Machine (DRAFT -> ISSUED -> CANCELED / REPLACED), PDFKit vector export, VietQR payments, and Financial Analytics.',
+      'Enterprise-grade Electronic Invoice RESTful API featuring Lifecycle State Machine (DRAFT -> ISSUED -> CANCELED / REPLACED), PDFKit vector generator with VietQR & Vietnamese words reading, Automated Email Dispatch, Batch ZIP export, JWT RBAC, and Financial Analytics.',
     contact: {
       name: 'Vu Minh Khang - Backend Engineering',
       email: 'billing@invoicetech.vn',
@@ -18,26 +18,74 @@ export const swaggerDocument = {
   ],
   tags: [
     { name: 'System', description: 'System health check and diagnostic endpoints' },
-    { name: 'Invoices', description: 'Core invoice lifecycle and CRUD operations' },
-    { name: 'Analytics & Export', description: 'Financial dashboards and CSV export' },
-    { name: 'Verification & Audit', description: 'Invoice authenticity and activity history' },
+    { name: 'Authentication & Roles', description: 'JWT authentication, demo tokens, and user profile' },
+    { name: 'Invoices', description: 'Core invoice lifecycle, CRUD, and state transitions' },
+    { name: 'Batch & Export', description: 'Batch operations, CSV table export, and ZIP bundle download' },
+    { name: 'Email Dispatch', description: 'Automated email notifications with vector PDF attachments' },
+    { name: 'Analytics & KPIs', description: 'Financial dashboards and customer statistics' },
+    { name: 'Verification & Audit', description: 'Invoice authenticity certificates and activity history' },
   ],
+  components: {
+    securitySchemes: {
+      BearerAuth: {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        description: 'Provide JWT Bearer Token (obtain via /api/auth/demo-accounts or /api/auth/login)',
+      },
+    },
+  },
   paths: {
     '/api/health': {
       get: {
         tags: ['System'],
         summary: 'Check API server health',
-        responses: {
-          '200': {
-            description: 'Server is healthy and operational',
+        responses: { '200': { description: 'Server is healthy and operational' } },
+      },
+    },
+    '/api/auth/demo-accounts': {
+      get: {
+        tags: ['Authentication & Roles'],
+        summary: 'Get pre-signed demo JWT tokens for all 4 roles (Admin, Chief Accountant, Accountant, Auditor)',
+        responses: { '200': { description: 'List of demo credentials with ready-to-use Bearer tokens' } },
+      },
+    },
+    '/api/auth/login': {
+      post: {
+        tags: ['Authentication & Roles'],
+        summary: 'Issue JWT Token for specified role/email',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['email', 'role'],
+                properties: {
+                  email: { type: 'string', example: 'accountant@invoicetech.vn' },
+                  name: { type: 'string', example: 'Nguyen Van Ke Toan' },
+                  role: { type: 'string', enum: ['ADMIN', 'CHIEF_ACCOUNTANT', 'ACCOUNTANT', 'AUDITOR'], example: 'ACCOUNTANT' },
+                },
+              },
+            },
           },
         },
+        responses: { '200': { description: 'JWT token issued successfully' } },
+      },
+    },
+    '/api/auth/me': {
+      get: {
+        tags: ['Authentication & Roles'],
+        summary: 'Get current authenticated user profile',
+        security: [{ BearerAuth: [] }],
+        responses: { '200': { description: 'User profile' } },
       },
     },
     '/api/invoices': {
       post: {
         tags: ['Invoices'],
         summary: 'Create a new draft invoice',
+        security: [{ BearerAuth: [] }],
         requestBody: {
           required: true,
           content: {
@@ -46,10 +94,10 @@ export const swaggerDocument = {
                 type: 'object',
                 required: ['customerName', 'items'],
                 properties: {
-                  customerName: { type: 'string', example: 'Cong ty Co phan FPT' },
-                  customerEmail: { type: 'string', example: 'billing@fpt.vn' },
-                  customerAddress: { type: 'string', example: 'Duy Tan, Cau Giay, Hanoi' },
-                  customerTaxCode: { type: 'string', example: '0101234567' },
+                  customerName: { type: 'string', example: 'Cong ty TNHH Cong Nghe Tuong Lai' },
+                  customerEmail: { type: 'string', example: 'billing@tuonglai.tech' },
+                  customerAddress: { type: 'string', example: 'Landmark 72, Hanoi' },
+                  customerTaxCode: { type: 'string', example: '0109988776' },
                   taxRate: { type: 'number', example: 10 },
                   notes: { type: 'string', example: 'Cloud services contract 2026' },
                   items: {
@@ -58,9 +106,9 @@ export const swaggerDocument = {
                       type: 'object',
                       required: ['description', 'quantity', 'unitPrice'],
                       properties: {
-                        description: { type: 'string', example: 'Dedicated Server E5' },
-                        quantity: { type: 'integer', example: 2 },
-                        unitPrice: { type: 'number', example: 15000000 },
+                        description: { type: 'string', example: 'Cloud Infrastructure Setup' },
+                        quantity: { type: 'integer', example: 1 },
+                        unitPrice: { type: 'number', example: 25000000 },
                       },
                     },
                   },
@@ -85,24 +133,25 @@ export const swaggerDocument = {
           { name: 'startDate', in: 'query', schema: { type: 'string', format: 'date' } },
           { name: 'endDate', in: 'query', schema: { type: 'string', format: 'date' } },
         ],
-        responses: {
-          '200': { description: 'Paginated list of invoices' },
-        },
+        responses: { '200': { description: 'Paginated list of invoices' } },
       },
     },
     '/api/invoices/analytics/summary': {
       get: {
-        tags: ['Analytics & Export'],
-        summary: 'Get financial summary and KPIs',
-        responses: {
-          '200': { description: 'Financial summary and statistics' },
-        },
+        tags: ['Analytics & KPIs'],
+        summary: 'Get financial summary, revenue KPIs, and top customers',
+        responses: { '200': { description: 'Financial summary and statistics' } },
       },
     },
     '/api/invoices/export/csv': {
       get: {
-        tags: ['Analytics & Export'],
-        summary: 'Export invoices as CSV file',
+        tags: ['Batch & Export'],
+        summary: 'Export invoice registry as UTF-8 BOM CSV for Excel',
+        parameters: [
+          { name: 'status', in: 'query', schema: { type: 'string', enum: ['DRAFT', 'ISSUED', 'CANCELED', 'REPLACED'] } },
+          { name: 'startDate', in: 'query', schema: { type: 'string', format: 'date' } },
+          { name: 'endDate', in: 'query', schema: { type: 'string', format: 'date' } },
+        ],
         responses: {
           '200': {
             description: 'CSV file download',
@@ -111,13 +160,66 @@ export const swaggerDocument = {
         },
       },
     },
+    '/api/invoices/export/zip': {
+      post: {
+        tags: ['Batch & Export'],
+        summary: 'Export multiple invoice PDFs bundled into a single ZIP archive',
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  invoiceIds: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    example: ['0d07e960-776e-4c15-8eaf-de4e49256bda'],
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'ZIP archive binary stream',
+            content: { 'application/zip': {} },
+          },
+        },
+      },
+    },
+    '/api/invoices/batch/issue': {
+      post: {
+        tags: ['Batch & Export'],
+        summary: 'Batch issue multiple draft invoices in an atomic transaction',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['invoiceIds'],
+                properties: {
+                  invoiceIds: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    example: ['draft-id-1', 'draft-id-2'],
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: { '200': { description: 'All requested invoices issued successfully' } },
+      },
+    },
     '/api/invoices/{id}': {
       get: {
         tags: ['Invoices'],
         summary: 'Get invoice details by ID',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
         responses: {
-          '200': { description: 'Invoice details with items and replacement history' },
+          '200': { description: 'Invoice details with items, Vietnamese words, and replacement history' },
           '404': { description: 'Invoice not found' },
         },
       },
@@ -125,19 +227,13 @@ export const swaggerDocument = {
         tags: ['Invoices'],
         summary: 'Update draft invoice',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-        responses: {
-          '200': { description: 'Draft invoice updated' },
-          '400': { description: 'Cannot update non-draft invoice' },
-        },
+        responses: { '200': { description: 'Draft invoice updated' } },
       },
       delete: {
         tags: ['Invoices'],
         summary: 'Delete draft invoice',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-        responses: {
-          '200': { description: 'Draft invoice deleted' },
-          '400': { description: 'Cannot delete non-draft invoice' },
-        },
+        responses: { '200': { description: 'Draft invoice deleted' } },
       },
     },
     '/api/invoices/{id}/issue': {
@@ -145,10 +241,7 @@ export const swaggerDocument = {
         tags: ['Invoices'],
         summary: 'Officially issue invoice (DRAFT -> ISSUED)',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-        responses: {
-          '200': { description: 'Invoice issued with unique number' },
-          '400': { description: 'Invoice already issued or not in draft state' },
-        },
+        responses: { '200': { description: 'Invoice issued with unique number' } },
       },
     },
     '/api/invoices/{id}/cancel': {
@@ -170,10 +263,7 @@ export const swaggerDocument = {
             },
           },
         },
-        responses: {
-          '200': { description: 'Invoice canceled' },
-          '400': { description: 'Invalid state or missing cancellation reason' },
-        },
+        responses: { '200': { description: 'Invoice canceled' } },
       },
     },
     '/api/invoices/{id}/replace': {
@@ -181,10 +271,7 @@ export const swaggerDocument = {
         tags: ['Invoices'],
         summary: 'Replace invoice (ISSUED/CANCELED -> REPLACED)',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-        responses: {
-          '201': { description: 'New replacement invoice created' },
-          '400': { description: 'Cannot replace draft or already replaced invoice' },
-        },
+        responses: { '201': { description: 'New replacement invoice created' } },
       },
     },
     '/api/invoices/{id}/pdf': {
@@ -194,10 +281,30 @@ export const swaggerDocument = {
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
         responses: {
           '200': {
-            description: 'PDF binary stream',
+            description: 'PDF binary stream with VietQR and in-words amount',
             content: { 'application/pdf': {} },
           },
         },
+      },
+    },
+    '/api/invoices/{id}/send-email': {
+      post: {
+        tags: ['Email Dispatch'],
+        summary: 'Send invoice PDF via email to customer with responsive HTML template',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  recipientEmail: { type: 'string', example: 'client@company.vn' },
+                },
+              },
+            },
+          },
+        },
+        responses: { '200': { description: 'Email dispatched successfully with attachment' } },
       },
     },
     '/api/invoices/{id}/history': {
@@ -205,9 +312,7 @@ export const swaggerDocument = {
         tags: ['Verification & Audit'],
         summary: 'Get invoice audit history and event logs',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-        responses: {
-          '200': { description: 'Invoice activity trail' },
-        },
+        responses: { '200': { description: 'Invoice activity trail' } },
       },
     },
     '/api/invoices/{id}/verify': {
@@ -215,9 +320,7 @@ export const swaggerDocument = {
         tags: ['Verification & Audit'],
         summary: 'Verify authenticity and legal validity of invoice',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-        responses: {
-          '200': { description: 'Verification certificate and status' },
-        },
+        responses: { '200': { description: 'Verification certificate and digital signature' } },
       },
     },
   },

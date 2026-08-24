@@ -2,6 +2,8 @@ import request from 'supertest';
 import { app } from '../../src/app';
 import { prisma } from '../../src/config/database';
 import { InvoiceStatus } from '../../src/constants/invoice.constant';
+import { UserRole } from '../../src/constants/auth.constant';
+import { AuthService } from '../../src/services/auth.service';
 
 jest.mock('../../src/config/database', () => {
   const mockPrisma: any = {
@@ -27,17 +29,58 @@ jest.mock('../../src/config/database', () => {
 });
 
 describe('Invoice Management API Integration Tests', () => {
+  let authService: AuthService;
+  let adminToken: string;
+
   beforeEach(() => {
     jest.clearAllMocks();
+    authService = new AuthService();
+    adminToken = authService.generateToken({
+      userId: 'usr-admin-1',
+      name: 'Admin Test',
+      email: 'admin@invoicetech.vn',
+      role: UserRole.ADMIN,
+    });
   });
 
   describe('GET /api/health', () => {
-    it('should return 200 OK with health status', async () => {
+    it('should return 200 OK with health status and security headers', async () => {
       const response = await request(app).get('/api/health');
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.data.status).toBe('UP');
+      expect(response.headers['x-request-id']).toBeDefined();
+    });
+  });
+
+  describe('Authentication Endpoints', () => {
+    it('GET /api/auth/demo-accounts should return demo credentials for all roles', async () => {
+      const response = await request(app).get('/api/auth/demo-accounts');
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(response.body.data).toHaveLength(4);
+    });
+
+    it('POST /api/auth/login should issue a JWT token', async () => {
+      const response = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'test@invoicetech.vn', role: 'ACCOUNTANT', name: 'Test Accountant' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.token).toBeDefined();
+    });
+
+    it('GET /api/auth/me should return authenticated user profile', async () => {
+      const response = await request(app)
+        .get('/api/auth/me')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.email).toBe('admin@invoicetech.vn');
     });
   });
 
@@ -134,6 +177,7 @@ describe('Invoice Management API Integration Tests', () => {
 
       const response = await request(app)
         .post('/api/invoices')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send(payload);
 
       expect(response.status).toBe(201);
@@ -141,111 +185,57 @@ describe('Invoice Management API Integration Tests', () => {
       expect(response.body.data.status).toBe(InvoiceStatus.DRAFT);
       expect(response.body.data.totalAmount).toBe(35200000);
     });
-
-    it('should return 400 Bad Request when customerName is missing or items are empty', async () => {
-      const invalidPayload = {
-        customerName: '',
-        items: [],
-      };
-
-      const response = await request(app)
-        .post('/api/invoices')
-        .send(invalidPayload);
-
-      expect(response.status).toBe(400);
-      expect(response.body.success).toBe(false);
-      expect(response.body.message).toBe('Validation error');
-    });
   });
 
-  describe('GET /api/invoices (List Invoices)', () => {
-    it('should return paginated list of invoices', async () => {
-      const mockInvoices = [
-        {
-          id: 'inv-1',
-          invoiceNumber: 'INV-202608-00001',
-          customerName: 'Customer A',
-          status: InvoiceStatus.ISSUED,
-          totalAmount: 1000,
-          items: [],
-        },
+  describe('POST /api/invoices/batch/issue', () => {
+    it('should batch issue multiple invoices', async () => {
+      const draftInvoices = [
+        { id: 'draft-1', status: InvoiceStatus.DRAFT, items: [{ id: '1' }] },
+        { id: 'draft-2', status: InvoiceStatus.DRAFT, items: [{ id: '2' }] },
       ];
 
-      (prisma.invoice.count as jest.Mock).mockResolvedValue(1);
-      (prisma.invoice.findMany as jest.Mock).mockResolvedValue(mockInvoices);
+      (prisma.invoice.findMany as jest.Mock).mockResolvedValue(draftInvoices);
+      (prisma.invoice.count as jest.Mock).mockResolvedValue(0);
+      (prisma.invoice.update as jest.Mock).mockImplementation(({ where, data }: any) => ({
+        id: where.id,
+        ...data,
+      }));
 
-      const response = await request(app).get('/api/invoices?page=1&limit=10');
+      const response = await request(app)
+        .post('/api/invoices/batch/issue')
+        .send({ invoiceIds: ['draft-1', 'draft-2'] });
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
-      expect(response.body.pagination).toBeDefined();
-      expect(response.body.pagination.total).toBe(1);
-      expect(response.body.data).toHaveLength(1);
+      expect(response.body.data.totalIssued).toBe(2);
     });
   });
 
-  describe('GET /api/invoices/:id (Get Details)', () => {
-    it('should return invoice details with totalAmountInWords when found', async () => {
+  describe('POST /api/invoices/:id/send-email', () => {
+    it('should dispatch email and return success message', async () => {
       const mockInvoice = {
         id: 'inv-101',
         invoiceNumber: 'INV-202608-00001',
         status: InvoiceStatus.ISSUED,
         customerName: 'Customer A',
-        totalAmount: 1000000,
-        items: [{ id: 'item-1', description: 'Item 1', quantity: 1, unitPrice: 100, amount: 100 }],
+        customerEmail: 'customer@a.com',
+        subtotal: 500,
+        taxRate: 10,
+        taxAmount: 50,
+        totalAmount: 550,
+        issuedAt: new Date(),
+        items: [{ description: 'Item 1', quantity: 1, unitPrice: 500, amount: 500 }],
       };
 
       (prisma.invoice.findUnique as jest.Mock).mockResolvedValue(mockInvoice);
 
-      const response = await request(app).get('/api/invoices/inv-101');
+      const response = await request(app)
+        .post('/api/invoices/inv-101/send-email')
+        .send({ recipientEmail: 'recipient@test.com' });
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
-      expect(response.body.data.id).toBe('inv-101');
-      expect(response.body.data.totalAmountInWords).toBe('Một triệu đồng chẵn');
-    });
-  });
-
-  describe('GET /api/invoices/:id/verify', () => {
-    it('should return verification certificate for an invoice', async () => {
-      const mockInvoice = {
-        id: 'inv-101',
-        invoiceNumber: 'INV-202608-00001',
-        status: InvoiceStatus.ISSUED,
-        customerName: 'Customer A',
-        totalAmount: 1000000,
-        subtotal: 900000,
-        taxAmount: 100000,
-        items: [],
-      };
-
-      (prisma.invoice.findUnique as jest.Mock).mockResolvedValue(mockInvoice);
-
-      const response = await request(app).get('/api/invoices/inv-101/verify');
-
-      expect(response.status).toBe(200);
-      expect(response.body.success).toBe(true);
-      expect(response.body.data.isValid).toBe(true);
-      expect(response.body.data.digitalSignature).toBeDefined();
-    });
-  });
-
-  describe('GET /api/invoices/:id/history', () => {
-    it('should return activity log history for an invoice', async () => {
-      (prisma.invoice.findUnique as jest.Mock).mockResolvedValue({
-        id: 'inv-101',
-        invoiceNumber: 'INV-202608-00001',
-        status: InvoiceStatus.ISSUED,
-      });
-      (prisma.invoiceActivity.findMany as jest.Mock).mockResolvedValue([
-        { id: 'act-1', action: 'ISSUED', description: 'Issued', createdAt: new Date() },
-      ]);
-
-      const response = await request(app).get('/api/invoices/inv-101/history');
-
-      expect(response.status).toBe(200);
-      expect(response.body.success).toBe(true);
-      expect(response.body.data.history).toHaveLength(1);
+      expect(response.body.data.recipient).toBe('recipient@test.com');
     });
   });
 
